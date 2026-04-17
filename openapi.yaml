@@ -1,0 +1,234 @@
+openapi: 3.0.0
+info:
+  title: Hotel SaaS API
+  description: End-to-end API collection for managing Organizations, Hotels, Rooms, Bookings, and Payments.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000
+    description: Local Development Server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      summary: Login User (Admin or Owner)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: admin@saas.com
+                password:
+                  type: string
+                  example: admin123
+      responses:
+        '200':
+          description: Successful login returns tokens.
+
+  /api/organizations:
+    post:
+      summary: Create Organization (Admin Only)
+      description: Requires Admin Bearer token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Test Hotel Group
+                website:
+                  type: string
+                  example: www.testhotel.com
+                phone:
+                  type: string
+                  example: 9876543210
+                address:
+                  type: string
+                  example: Hyderabad
+                ownerName:
+                  type: string
+                  example: John Owner
+                ownerEmail:
+                  type: string
+                  example: owner@test.com
+                ownerPassword:
+                  type: string
+                  example: owner123
+      responses:
+        '201':
+          description: Created
+
+  /api/hotels:
+    post:
+      summary: Create Hotel (Owner Only)
+      description: Requires Owner Bearer token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Test Hotel
+                location:
+                  type: string
+                  example: Hyderabad
+                description:
+                  type: string
+                  example: Luxury hotel
+                image_urls:
+                  type: array
+                  items:
+                    type: string
+                  example: ["https://test.com/image1.jpg"]
+      responses:
+        '201':
+          description: Created
+
+  /api/rooms:
+    post:
+      summary: Create Room (Owner Only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hotel_id:
+                  type: string
+                  description: "Use the ID returned from Hotel creation"
+                  example: "<replace-with-hotel-id>"
+                room_number:
+                  type: string
+                  example: "101"
+                type:
+                  type: string
+                  example: Deluxe
+                price:
+                  type: number
+                  example: 3000
+                max_guests:
+                  type: integer
+                  example: 3
+                amenities:
+                  type: array
+                  items:
+                    type: string
+                  example: ["AC", "WiFi"]
+                image_urls:
+                  type: array
+                  items:
+                    type: string
+                  example: ["https://test.com/room.jpg"]
+      responses:
+        '201':
+          description: Created
+
+  /api/customers:
+    post:
+      summary: Create Customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Rahul
+                email:
+                  type: string
+                  example: rahul@test.com
+                phone:
+                  type: string
+                  example: 9999999999
+      responses:
+        '201':
+          description: Created
+
+  /api/bookings:
+    post:
+      summary: Create Booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                room_id:
+                  type: string
+                  example: "<replace-with-room-id>"
+                customer_id:
+                  type: string
+                  example: "<replace-with-customer-id>"
+                check_in:
+                  type: string
+                  example: "2026-04-20"
+                check_out:
+                  type: string
+                  example: "2026-04-22"
+                adults_count:
+                  type: integer
+                  example: 2
+                children_count:
+                  type: integer
+                  example: 1
+                children_ages:
+                  type: array
+                  items:
+                    type: integer
+                  example: [5]
+                notes:
+                  type: string
+                  example: Test note
+      responses:
+        '201':
+          description: Created
+
+  /api/payments:
+    post:
+      summary: Create Payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                booking_id:
+                  type: string
+                  example: "<replace-with-booking-id>"
+                amount:
+                  type: number
+                  example: 6000
+                status:
+                  type: string
+                  example: PAID
+                method:
+                  type: string
+                  example: UPI
+      responses:
+        '201':
+          description: Created
