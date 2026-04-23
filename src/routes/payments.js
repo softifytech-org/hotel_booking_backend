@@ -1,10 +1,11 @@
 const router = require('express').Router();
 const { authenticate } = require('../middleware/auth');
 const { requireOrgAccess } = require('../middleware/roleGuard');
-const { createPayment, getPayments, refundPayment } = require('../controllers/paymentController');
+const { createBookingPayment, getPayments, refundBookingPayment } = require('../controllers/paymentController');
 
-router.post('/', authenticate, requireOrgAccess, createPayment);
+// Legacy REST endpoints (backward compatible with frontend)
+router.post('/', authenticate, requireOrgAccess, createBookingPayment);
 router.get('/', authenticate, requireOrgAccess, getPayments);
-router.patch('/:id/refund', authenticate, requireOrgAccess, refundPayment);
+router.patch('/:id/refund', authenticate, requireOrgAccess, refundBookingPayment);
 
 module.exports = router;

@@ -1,25 +1,37 @@
 const pool = require('../config/database');
 const { createError } = require('../middleware/errorHandler');
 
-// Scope org: owners can only touch their own org's hotels
-const getOrgId = (req) =>
-  req.user.role === 'SUPER_ADMIN' ? null : req.user.organization_id;
-
-// POST /api/hotels
-const createHotel = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  POST /api/createHotel
+//  Creates a hotel within the authenticated org
+// ─────────────────────────────────────────────
+const createOrganizationHotel = async (req, res, next) => {
   try {
     const orgId = req.orgId; // Injected by requireOrgAccess
     if (!orgId) return next(createError('Organization context required', 400));
 
-    const { name, location, description, phone, email, address, image_urls } = req.body;
+    const { name, location, description, phone, email, address, image_urls, city, state } = req.body;
+
+    // Defensive validation (express-validator handles route-level)
     if (!name) return next(createError('Hotel name is required', 400));
+    if (!city || !city.trim()) return next(createError('City is required', 400));
+    if (!state || !state.trim()) return next(createError('State is required', 400));
 
     const { rows } = await pool.query(
-      `INSERT INTO hotels (organization_id, name, location, description, phone, email, address, image_urls)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [orgId, name.trim(), location || null, description || null,
-       phone || null, email || null, address || null,
-       image_urls && image_urls.length ? image_urls : []]
+      `INSERT INTO hotels (organization_id, name, location, description, phone, email, address, image_urls, city, state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [
+        orgId,
+        name.trim(),
+        location || null,
+        description || null,
+        phone || null,
+        email || null,
+        address || null,
+        image_urls && image_urls.length ? image_urls : [],
+        city.trim(),
+        state.trim()
+      ]
     );
 
     res.status(201).json({ success: true, data: rows[0] });
@@ -28,37 +40,93 @@ const createHotel = async (req, res, next) => {
   }
 };
 
-// GET /api/hotels  (scoped to org unless super admin adds ?orgId=)
-const getHotels = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  GET /api/getHotels
+//  Paginated list with search by name/city/state
+//  Scoped to org unless super admin
+// ─────────────────────────────────────────────
+const getOrganizationHotels = async (req, res, next) => {
   try {
-    // req.orgId handles both OWNER tracking and SUPER_ADMIN explicitly passed orgId
     const scopedOrgId = req.orgId;
+    const { search, city, state, organization_id, page = 1, limit = 20 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
 
-    let query = `
-      SELECT h.*,
+    const conditions = [];
+    const params = [];
+
+    // Organization scoping
+    if (scopedOrgId) {
+      params.push(scopedOrgId);
+      conditions.push(`h.organization_id = $${params.length}`);
+    } else if (organization_id) {
+      params.push(organization_id);
+      conditions.push(`h.organization_id = $${params.length}`);
+    }
+
+    // Search by hotel name
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`h.name ILIKE $${params.length}`);
+    }
+
+    // Filter by city
+    if (city) {
+      params.push(`%${city}%`);
+      conditions.push(`h.city ILIKE $${params.length}`);
+    }
+
+    // Filter by state
+    if (state) {
+      params.push(`%${state}%`);
+      conditions.push(`h.state ILIKE $${params.length}`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Count total for pagination
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT h.id) AS total FROM hotels h ${where}`,
+      params
+    );
+    const totalCount = parseInt(countResult.rows[0].total);
+
+    // Fetch paginated results with room counts
+    params.push(limitNum);
+    params.push(offset);
+    const { rows } = await pool.query(
+      `SELECT h.*,
         COUNT(DISTINCT r.id) AS rooms_count,
         COUNT(DISTINCT r.id) FILTER (WHERE r.status = 'Available') AS available_rooms
       FROM hotels h
       LEFT JOIN rooms r ON r.hotel_id = h.id
-    `;
-    const params = [];
+      ${where}
+      GROUP BY h.id
+      ORDER BY h.created_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
 
-    if (scopedOrgId) {
-      query += ' WHERE h.organization_id = $1';
-      params.push(scopedOrgId);
-    }
-
-    query += ' GROUP BY h.id ORDER BY h.created_at DESC';
-
-    const { rows } = await pool.query(query, params);
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total_count: totalCount,
+        total_pages: Math.ceil(totalCount / limitNum)
+      }
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// GET /api/hotels/:id
-const getHotelById = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  GET /api/getHotel/:id
+// ─────────────────────────────────────────────
+const getOrganizationHotelById = async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT h.*, COUNT(DISTINCT r.id) AS rooms_count
@@ -70,7 +138,7 @@ const getHotelById = async (req, res, next) => {
     if (!rows.length) return next(createError('Hotel not found', 404));
 
     const hotel = rows[0];
-    if (hotel.organization_id !== req.orgId) {
+    if (req.orgId && hotel.organization_id !== req.orgId) {
       return next(createError('Access denied', 403));
     }
 
@@ -80,10 +148,12 @@ const getHotelById = async (req, res, next) => {
   }
 };
 
-// PUT /api/hotels/:id
-const updateHotel = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  PUT /api/updateHotel/:id
+// ─────────────────────────────────────────────
+const updateOrganizationHotel = async (req, res, next) => {
   try {
-    const { name, location, description, phone, email, address, image_urls, status, rating } = req.body;
+    const { name, location, description, phone, email, address, image_urls, status, rating, city, state } = req.body;
 
     const existing = await pool.query('SELECT * FROM hotels WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return next(createError('Hotel not found', 404));
@@ -102,10 +172,12 @@ const updateHotel = async (req, res, next) => {
         address = COALESCE($6, address),
         image_urls = COALESCE($7, image_urls),
         status = COALESCE($8, status),
-        rating = COALESCE($9, rating)
-       WHERE id = $10 RETURNING *`,
+        rating = COALESCE($9, rating),
+        city = COALESCE($10, city),
+        state = COALESCE($11, state)
+       WHERE id = $12 RETURNING *`,
       [name, location, description, phone, email, address,
-       image_urls, status, rating, req.params.id]
+       image_urls, status, rating, city, state, req.params.id]
     );
 
     res.json({ success: true, data: rows[0] });
@@ -114,8 +186,10 @@ const updateHotel = async (req, res, next) => {
   }
 };
 
-// DELETE /api/hotels/:id
-const deleteHotel = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  DELETE /api/deleteHotel/:id
+// ─────────────────────────────────────────────
+const deleteOrganizationHotel = async (req, res, next) => {
   try {
     const existing = await pool.query('SELECT * FROM hotels WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return next(createError('Hotel not found', 404));
@@ -131,4 +205,10 @@ const deleteHotel = async (req, res, next) => {
   }
 };
 
-module.exports = { createHotel, getHotels, getHotelById, updateHotel, deleteHotel };
+module.exports = {
+  createOrganizationHotel,
+  getOrganizationHotels,
+  getOrganizationHotelById,
+  updateOrganizationHotel,
+  deleteOrganizationHotel
+};

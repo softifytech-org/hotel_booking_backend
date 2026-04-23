@@ -1,8 +1,10 @@
 const pool = require('../config/database');
 const { createError } = require('../middleware/errorHandler');
 
-// POST /api/payments
-const createPayment = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  POST /api/createPayment
+// ─────────────────────────────────────────────
+const createBookingPayment = async (req, res, next) => {
   try {
     const { booking_id, amount, method, transaction_ref } = req.body;
     if (!booking_id || !amount) return next(createError('booking_id and amount are required', 400));
@@ -28,18 +30,44 @@ const createPayment = async (req, res, next) => {
   }
 };
 
-// GET /api/payments
+// ─────────────────────────────────────────────
+//  GET /api/getPayments
+//  Filters: booking_id, organization_id
+//  Includes revenue summary
+// ─────────────────────────────────────────────
 const getPayments = async (req, res, next) => {
   try {
     const orgId = req.orgId;
+    const { booking_id, page = 1, limit = 20 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
+
+    const conditions = [];
     const params = [];
-    let where = '';
 
     if (orgId) {
       params.push(orgId);
-      where = `WHERE p.organization_id = $1`;
+      conditions.push(`p.organization_id = $${params.length}`);
     }
 
+    if (booking_id) {
+      params.push(booking_id);
+      conditions.push(`p.booking_id = $${params.length}`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Count total for pagination
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total FROM payments p ${where}`,
+      params
+    );
+    const totalCount = parseInt(countResult.rows[0].total);
+
+    // Fetch paginated results
+    params.push(limitNum);
+    params.push(offset);
     const { rows } = await pool.query(
       `SELECT p.*,
          c.name AS guest_name, c.email AS guest_email,
@@ -51,11 +79,12 @@ const getPayments = async (req, res, next) => {
        JOIN rooms r ON r.id = b.room_id
        JOIN hotels h ON h.id = r.hotel_id
        ${where}
-       ORDER BY p.created_at DESC`,
+       ORDER BY p.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
 
-    // Compute summary stats
+    // Compute revenue summary
     const successful = rows.filter(r => r.status === 'PAID');
     const totalRevenue = successful.reduce((sum, r) => sum + parseFloat(r.amount), 0);
     const refunded = rows.filter(r => r.status === 'REFUNDED').reduce((sum, r) => sum + parseFloat(r.amount), 0);
@@ -68,15 +97,23 @@ const getPayments = async (req, res, next) => {
         net: totalRevenue - refunded,
         transactions: rows.length
       },
-      data: rows
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total_count: totalCount,
+        total_pages: Math.ceil(totalCount / limitNum)
+      }
     });
   } catch (err) {
     next(err);
   }
 };
 
-// PATCH /api/payments/:id/refund
-const refundPayment = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  PATCH /api/refundPayment/:id
+// ─────────────────────────────────────────────
+const refundBookingPayment = async (req, res, next) => {
   try {
     const { rows } = await pool.query('SELECT * FROM payments WHERE id = $1', [req.params.id]);
     if (!rows.length) return next(createError('Payment not found', 404));
@@ -96,4 +133,4 @@ const refundPayment = async (req, res, next) => {
   }
 };
 
-module.exports = { createPayment, getPayments, refundPayment };
+module.exports = { createBookingPayment, getPayments, refundBookingPayment };

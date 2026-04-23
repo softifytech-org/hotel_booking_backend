@@ -18,20 +18,23 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Rate limiter — 100 requests per 15 minutes per IP
+// Rate limiting — disabled in development, active in production
+const isDev = process.env.NODE_ENV !== 'production';
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: isDev ? 10000 : 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isDev,
   message: { success: false, message: 'Too many requests, please slow down.' }
 });
 app.use('/api', limiter);
 
-// Stricter limiter for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: isDev ? 10000 : 20,
+  skip: () => isDev,
   message: { success: false, message: 'Too many login attempts, try again in 15 minutes.' }
 });
 app.use('/api/auth/login', authLimiter);
@@ -51,7 +54,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ─── API Routes ───────────────────────────────────────
+// ─── Action-Based API Routes (Professional Naming) ────
+// e.g., /api/createHotel, /api/fetchBookings, /api/fetchRooms
+app.use('/api', require('./src/routes/actionRoutes'));
+
+// ─── Legacy REST Routes (Backward Compatible) ────────
 app.use('/api/auth',          require('./src/routes/auth'));
 app.use('/api/organizations', require('./src/routes/organizations'));
 app.use('/api/hotels',        require('./src/routes/hotels'));

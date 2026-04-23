@@ -23,6 +23,9 @@ CREATE TYPE payment_method AS ENUM ('CASH', 'CARD', 'BANK_TRANSFER', 'UPI', 'OTH
 CREATE TABLE organizations (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name          VARCHAR(255) NOT NULL,
+  code          VARCHAR(10) UNIQUE,
+  logo_url      TEXT,
+  banner_images TEXT[] DEFAULT '{}',
   website       VARCHAR(255),
   phone         VARCHAR(50),
   address       TEXT,
@@ -59,6 +62,8 @@ CREATE TABLE hotels (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id   UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   name              VARCHAR(255) NOT NULL,
+  city              VARCHAR(100),
+  state             VARCHAR(100),
   location          VARCHAR(255),
   description       TEXT,
   phone             VARCHAR(50),

@@ -1,12 +1,19 @@
 const router = require('express').Router();
 const { authenticate } = require('../middleware/auth');
-const { requireRole , requireOrgAccess } = require('../middleware/roleGuard');
-const { createHotel, getHotels, getHotelById, updateHotel, deleteHotel } = require('../controllers/hotelController');
+const { requireRole, requireOrgAccess } = require('../middleware/roleGuard');
+const {
+  createOrganizationHotel,
+  getOrganizationHotels,
+  getOrganizationHotelById,
+  updateOrganizationHotel,
+  deleteOrganizationHotel
+} = require('../controllers/hotelController');
 
-router.post('/', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), createHotel);
-router.get('/', authenticate, requireOrgAccess, getHotels);
-router.get('/:id', authenticate, requireOrgAccess, getHotelById);
-router.put('/:id', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), updateHotel);
-router.delete('/:id', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), deleteHotel);
+// Legacy REST endpoints (backward compatible with frontend)
+router.post('/', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), createOrganizationHotel);
+router.get('/', authenticate, requireOrgAccess, getOrganizationHotels);
+router.get('/:id', authenticate, requireOrgAccess, getOrganizationHotelById);
+router.put('/:id', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), updateOrganizationHotel);
+router.delete('/:id', authenticate, requireOrgAccess, requireRole('OWNER', 'SUPER_ADMIN'), deleteOrganizationHotel);
 
 module.exports = router;

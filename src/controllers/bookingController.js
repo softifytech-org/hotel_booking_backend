@@ -1,7 +1,9 @@
 const pool = require('../config/database');
 const { createError } = require('../middleware/errorHandler');
 
-// POST /api/bookings
+// ─────────────────────────────────────────────
+//  POST /api/createBooking
+// ─────────────────────────────────────────────
 const createBooking = async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -97,11 +99,18 @@ const createBooking = async (req, res, next) => {
   }
 };
 
-// GET /api/bookings
+// ─────────────────────────────────────────────
+//  GET /api/getBookings
+//  Paginated list with filters: status, hotel_id,
+//  customer_id, room_id, organization_id
+// ─────────────────────────────────────────────
 const getBookings = async (req, res, next) => {
   try {
-    const { status, hotel_id } = req.query;
+    const { status, hotel_id, customer_id, room_id, page = 1, limit = 20 } = req.query;
     const orgId = req.orgId;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
 
     const conditions = [];
     const params = [];
@@ -118,9 +127,31 @@ const getBookings = async (req, res, next) => {
       params.push(hotel_id);
       conditions.push(`h.id = $${params.length}`);
     }
+    if (customer_id) {
+      params.push(customer_id);
+      conditions.push(`b.customer_id = $${params.length}`);
+    }
+    if (room_id) {
+      params.push(room_id);
+      conditions.push(`b.room_id = $${params.length}`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Count total for pagination
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM bookings b
+       JOIN rooms r ON r.id = b.room_id
+       JOIN hotels h ON h.id = r.hotel_id
+       ${where}`,
+      params
+    );
+    const totalCount = parseInt(countResult.rows[0].total);
+
+    // Fetch paginated results
+    params.push(limitNum);
+    params.push(offset);
     const { rows } = await pool.query(
       `SELECT b.*,
          c.name AS guest_name, c.email AS guest_email, c.phone AS guest_phone,
@@ -131,17 +162,29 @@ const getBookings = async (req, res, next) => {
        JOIN rooms r ON r.id = b.room_id
        JOIN hotels h ON h.id = r.hotel_id
        ${where}
-       ORDER BY b.created_at DESC`,
+       ORDER BY b.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
 
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total_count: totalCount,
+        total_pages: Math.ceil(totalCount / limitNum)
+      }
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// GET /api/bookings/:id
+// ─────────────────────────────────────────────
+//  GET /api/getBooking/:id
+// ─────────────────────────────────────────────
 const getBookingById = async (req, res, next) => {
   try {
     const { rows } = await pool.query(
@@ -158,7 +201,7 @@ const getBookingById = async (req, res, next) => {
     );
 
     if (!rows.length) return next(createError('Booking not found', 404));
-    if (rows[0].organization_id !== req.orgId) {
+    if (req.orgId && rows[0].organization_id !== req.orgId) {
       return next(createError('Access denied', 403));
     }
 
@@ -168,8 +211,10 @@ const getBookingById = async (req, res, next) => {
   }
 };
 
-// PATCH /api/bookings/:id/checkin
-const checkIn = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  PATCH /api/checkInBooking/:id
+// ─────────────────────────────────────────────
+const checkInBooking = async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -196,8 +241,10 @@ const checkIn = async (req, res, next) => {
   }
 };
 
-// PATCH /api/bookings/:id/checkout
-const checkOut = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  PATCH /api/checkOutBooking/:id
+// ─────────────────────────────────────────────
+const checkOutBooking = async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -231,7 +278,9 @@ const checkOut = async (req, res, next) => {
   }
 };
 
-// PATCH /api/bookings/:id/cancel
+// ─────────────────────────────────────────────
+//  PATCH /api/cancelBooking/:id
+// ─────────────────────────────────────────────
 const cancelBooking = async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -259,4 +308,4 @@ const cancelBooking = async (req, res, next) => {
   }
 };
 
-module.exports = { createBooking, getBookings, getBookingById, checkIn, checkOut, cancelBooking };
+module.exports = { createBooking, getBookings, getBookingById, checkInBooking, checkOutBooking, cancelBooking };

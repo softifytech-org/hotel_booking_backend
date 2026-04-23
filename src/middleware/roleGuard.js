@@ -1,3 +1,5 @@
+const pool = require('../config/database');
+
 // Role hierarchy guard — pass allowed roles as an array
 const requireRole = (...allowedRoles) => {
   return (req, res, next) => {
@@ -14,36 +16,49 @@ const requireRole = (...allowedRoles) => {
   };
 };
 
-const requireOrgAccess = (req, res, next) => {
-  if (req.user.role === 'SUPER_ADMIN') {
-    // SUPER_ADMIN must explicitly provide the organization context
-    const orgId = req.params.orgId || req.body.organization_id || req.body.orgId || req.query.orgId || req.query.organization_id;
-    
-    // For GET lists (like fetching all hotels without an orgId), we might want to bypass, or strictly enforce.
-    // Given the prompt: "For SUPER_ADMIN: orgId must come from request... If SUPER_ADMIN does not provide orgId -> return error"
-    if (!orgId) {
-      // Bypassing enforcement for GET requests to allow scanning all records globally if intended
-      if (req.method === 'GET') {
-        req.orgId = null;
-        return next();
+const requireOrgAccess = async (req, res, next) => {
+  try {
+    if (req.user.role === 'SUPER_ADMIN') {
+      // SUPER_ADMIN must explicitly provide the organization context
+      const rawOrgId = req.params.orgId || req.body.organization_id || req.body.orgId || req.query.orgId || req.query.organization_id;
+
+      if (!rawOrgId) {
+        // Allow GET without orgId for global scanning (e.g. list all hotels)
+        if (req.method === 'GET') {
+          req.orgId = null;
+          return next();
+        }
+        return res.status(400).json({ success: false, message: 'organization_id is required for super admin operations' });
       }
-      return res.status(400).json({ success: false, message: 'organization_id is required for super admin operations' });
+
+      const orgId = parseInt(rawOrgId, 10);
+      if (isNaN(orgId)) {
+        return res.status(400).json({ success: false, message: 'organization_id must be a valid integer' });
+      }
+
+      // Validate the org actually exists before setting context
+      const { rows } = await pool.query('SELECT id FROM organizations WHERE id = $1', [orgId]);
+      if (!rows.length) {
+        return res.status(404).json({ success: false, message: 'Organization not found' });
+      }
+
+      req.orgId = orgId;
+      return next();
     }
-    
-    req.orgId = parseInt(orgId, 10);
-    return next();
+
+    // For OWNER, automatically align to their token
+    req.orgId = req.user.organization_id;
+
+    // Extra check: If an OWNER tries to act on *another* orgId passed in the payload, block them
+    const explicitOrgId = req.params.orgId || req.body.organization_id || req.body.orgId || req.query.orgId || req.query.organization_id;
+    if (explicitOrgId && parseInt(explicitOrgId, 10) !== req.orgId) {
+      return res.status(403).json({ success: false, message: 'Access denied to this organization' });
+    }
+
+    next();
+  } catch (err) {
+    next(err);
   }
-
-  // For OWNER, automatically align to their token
-  req.orgId = req.user.organization_id;
-
-  // Extra check: If an OWNER tries to act on *another* orgId passed in the payload, block them
-  const explicitOrgId = req.params.orgId || req.body.organization_id || req.body.orgId || req.query.orgId || req.query.organization_id;
-  if (explicitOrgId && parseInt(explicitOrgId, 10) !== req.orgId) {
-    return res.status(403).json({ success: false, message: 'Access denied to this organization' });
-  }
-
-  next();
 };
 
 module.exports = { requireRole, requireOrgAccess };

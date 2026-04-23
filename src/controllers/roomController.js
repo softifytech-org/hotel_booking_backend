@@ -1,12 +1,14 @@
 const pool = require('../config/database');
 const { createError } = require('../middleware/errorHandler');
 
-// POST /api/rooms
-const createRoom = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  POST /api/createRoom
+// ─────────────────────────────────────────────
+const createHotelRoom = async (req, res, next) => {
   try {
     const {
       hotel_id, room_number, type, price, floor,
-      max_guests, adults, children, amenities, image_urls
+      max_guests, amenities, image_urls
     } = req.body;
 
     if (!hotel_id || !room_number || !price) {
@@ -41,15 +43,27 @@ const createRoom = async (req, res, next) => {
   }
 };
 
-// GET /api/rooms?hotel_id=...
-const getRooms = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  GET /api/getRooms
+//  Paginated list with filters: hotel_id, status,
+//  search by room_number, filter by type
+// ─────────────────────────────────────────────
+const getHotelRooms = async (req, res, next) => {
   try {
-    const { hotel_id, status } = req.query;
+    const { hotel_id, status, search, type, organization_id, page = 1, limit = 20 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
+
     const conditions = [];
     const params = [];
 
-    if (req.user.role !== 'SUPER_ADMIN') {
-      params.push(req.user.organization_id);
+    // Organization scoping
+    if (req.orgId) {
+      params.push(req.orgId);
+      conditions.push(`h.organization_id = $${params.length}`);
+    } else if (organization_id) {
+      params.push(organization_id);
       conditions.push(`h.organization_id = $${params.length}`);
     }
 
@@ -63,25 +77,59 @@ const getRooms = async (req, res, next) => {
       conditions.push(`r.status = $${params.length}`);
     }
 
+    // Search by room number
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`r.room_number ILIKE $${params.length}`);
+    }
+
+    // Filter by room type
+    if (type) {
+      params.push(type);
+      conditions.push(`r.type = $${params.length}`);
+    }
+
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Count total for pagination
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total FROM rooms r JOIN hotels h ON h.id = r.hotel_id ${where}`,
+      params
+    );
+    const totalCount = parseInt(countResult.rows[0].total);
+
+    // Fetch paginated results
+    params.push(limitNum);
+    params.push(offset);
     const { rows } = await pool.query(
       `SELECT r.*, h.name AS hotel_name, h.organization_id
        FROM rooms r
        JOIN hotels h ON h.id = r.hotel_id
        ${where}
-       ORDER BY r.created_at DESC`,
+       ORDER BY r.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
 
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total_count: totalCount,
+        total_pages: Math.ceil(totalCount / limitNum)
+      }
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// GET /api/rooms/:id
-const getRoomById = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  GET /api/getRoom/:id
+// ─────────────────────────────────────────────
+const getHotelRoomById = async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT r.*, h.name AS hotel_name, h.organization_id
@@ -91,7 +139,7 @@ const getRoomById = async (req, res, next) => {
     );
 
     if (!rows.length) return next(createError('Room not found', 404));
-    if (rows[0].organization_id !== req.orgId) {
+    if (req.orgId && rows[0].organization_id !== req.orgId) {
       return next(createError('Access denied', 403));
     }
 
@@ -101,12 +149,14 @@ const getRoomById = async (req, res, next) => {
   }
 };
 
-// PUT /api/rooms/:id
-const updateRoom = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  PUT /api/updateRoom/:id
+// ─────────────────────────────────────────────
+const updateHotelRoom = async (req, res, next) => {
   try {
     const {
       room_number, type, price, floor, max_guests,
-      adults, children, amenities, image_urls, status, is_active
+      amenities, image_urls, status, is_active
     } = req.body;
 
     const existing = await pool.query(
@@ -142,8 +192,10 @@ const updateRoom = async (req, res, next) => {
   }
 };
 
-// DELETE /api/rooms/:id
-const deleteRoom = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  DELETE /api/deleteRoom/:id  (soft delete)
+// ─────────────────────────────────────────────
+const deleteHotelRoom = async (req, res, next) => {
   try {
     const existing = await pool.query(
       `SELECT r.id, h.organization_id FROM rooms r
@@ -162,8 +214,10 @@ const deleteRoom = async (req, res, next) => {
   }
 };
 
-// GET /api/rooms/:id/availability?check_in=&check_out=
-const checkAvailability = async (req, res, next) => {
+// ─────────────────────────────────────────────
+//  GET /api/checkRoomAvailability/:id
+// ─────────────────────────────────────────────
+const checkHotelRoomAvailability = async (req, res, next) => {
   try {
     const { check_in, check_out } = req.query;
     if (!check_in || !check_out) return next(createError('check_in and check_out required', 400));
@@ -183,4 +237,11 @@ const checkAvailability = async (req, res, next) => {
   }
 };
 
-module.exports = { createRoom, getRooms, getRoomById, updateRoom, deleteRoom, checkAvailability };
+module.exports = {
+  createHotelRoom,
+  getHotelRooms,
+  getHotelRoomById,
+  updateHotelRoom,
+  deleteHotelRoom,
+  checkHotelRoomAvailability
+};
