@@ -90,9 +90,16 @@ const validateCreateHotel = [
     .trim()
     .notEmpty().withMessage('State is required')
     .isLength({ min: 2, max: 100 }).withMessage('State must be 2–100 characters'),
+  body('phone')
+    .trim()
+    .notEmpty().withMessage('Phone number is required'),
   body('email')
-    .optional()
+    .trim()
+    .notEmpty().withMessage('Email is required')
     .isEmail().withMessage('Invalid hotel email format'),
+  body('address')
+    .trim()
+    .notEmpty().withMessage('Address is required'),
   handleValidationErrors
 ];
 
@@ -113,7 +120,7 @@ const validateUpdateHotel = [
     .trim()
     .isLength({ min: 2, max: 100 }).withMessage('State must be 2–100 characters'),
   body('email')
-    .optional()
+    .optional({ nullable: true, checkFalsy: true })
     .isEmail().withMessage('Invalid hotel email format'),
   handleValidationErrors
 ];
